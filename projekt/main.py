@@ -13,17 +13,17 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-logger.info("System uruchomiony. Rozpoczęcie zbierania danych...")
+logger.info("System started. Beginning data collection...")
 
 try:
     while True:
         try:
-            logger.info("Rozpoczynanie nowego cykl zbierania pakietów...")
+            logger.info("Starting new packet capture cycle...")
             packets = capture_packets(duration=10)
             aggregate_and_save(packets)
         except Exception as e:
-            logger.error(f"Nieoczekiwany błąd w pętli głównej: {e}")
+            logger.error(f"Unexpected error in main loop: {e}")
         time.sleep(1)
 except KeyboardInterrupt:
-    logger.info("System zatrzymany przez użytkownika.")
-    print("\nSystem zatrzymany.")
+    logger.info("System stopped by user.")
+    print("\nSystem stopped.")
