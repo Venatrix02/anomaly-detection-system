@@ -15,11 +15,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("System uruchomiony. Rozpoczęcie zbierania danych...")
 
-while True:
-    try:
-        logger.info("Rozpoczynanie nowego cykl zbierania pakietów...")
-        packets = capture_packets(duration=10)
-        aggregate_and_save(packets)
-    except Exception as e:
-        logger.error(f"Nieoczekiwany błąd w pętli głównej: {e}")
-    time.sleep(1)
+try:
+    while True:
+        try:
+            logger.info("Rozpoczynanie nowego cykl zbierania pakietów...")
+            packets = capture_packets(duration=10)
+            aggregate_and_save(packets)
+        except Exception as e:
+            logger.error(f"Nieoczekiwany błąd w pętli głównej: {e}")
+        time.sleep(1)
+except KeyboardInterrupt:
+    logger.info("System zatrzymany przez użytkownika.")
+    print("\nSystem zatrzymany.")
