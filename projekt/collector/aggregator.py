@@ -24,11 +24,12 @@ def aggregate_and_save(packet_list):
     tcp_count = sum(1 for p in packet_list if p["protocol"] == "TCP")
     udp_count = sum(1 for p in packet_list if p["protocol"] == "UDP")
     unique_connections = len(set((p["src_ip"], p["dst_ip"]) for p in packet_list))
-    incoming = sum(1 for p in packet_list if p["dst_ip"].startswith("192.168"))
+    incoming = sum(1 for p in packet_list if p["dst_ip"].startswith("192.168.0"))
     outgoing = total - incoming
     in_out_ratio = round(incoming / total, 2) if total > 0 else 0
     port_counter = Counter(p["dst_port"] for p in packet_list)
-    dominant_port = port_counter.most_common(1)[0][0] if port_counter else 0
+    most_common = port_counter.most_common(1) 
+    dominant_port = most_common[0][0] if most_common else 0
 
     metric = NetworkMetric(
         packets_count=total,
