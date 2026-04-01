@@ -14,6 +14,9 @@ class NetworkMetric(Base):
     avg_packet_size = Column(Float)
     tcp_ratio = Column(Float)
     udp_ratio = Column(Float)
+    unique_connections = Column(Integer)
+    in_out_ratio = Column(Float)
+    dominant_port = Column(Integer)
 
 class ModelInfo(Base):
     __tablename__ = "model_info"
