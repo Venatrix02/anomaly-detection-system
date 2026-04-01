@@ -12,7 +12,7 @@ def save_log_to_db(session, level, message):
 
 def aggregate_and_save(packet_list):
     if not packet_list:
-        logger.warning("Brak pakietów do agregacji")
+        logger.warning("No packets to aggregate")
         return
 
     total = len(packet_list)
@@ -48,12 +48,12 @@ def aggregate_and_save(packet_list):
     try:
         session.add(metric)
         session.commit()
-        msg = f"Zapisano metrykę: {total} pakietów, {unique_ips} unikalnych IP"
+        msg = f"Metric saved: {total} packets, {unique_ips} unique IPs"
         logger.info(msg)
         save_log_to_db(session, "INFO", msg)
     except Exception as e:
         session.rollback()
-        logger.error(f"Błąd zapisu metryki: {e}")
+        logger.error(f"Error saving metric: {e}")
         save_log_to_db(session, "ERROR", str(e))
     finally:
         session.close()
