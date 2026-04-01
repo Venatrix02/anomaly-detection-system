@@ -26,7 +26,7 @@ def capture_packets(duration=10):
             prn=lambda pkt: process_packet(pkt, packet_list),
             store=False
         )
-        logger.info(f"Przechwycono {len(packet_list)} pakietów")
+        logger.info(f"Captured {len(packet_list)} packets")
     except Exception as e:
-        logger.error(f"Błąd podczas przechwytywania pakietów: {e}")
+        logger.error(f"Error during packet capture: {e}")
     return packet_list
