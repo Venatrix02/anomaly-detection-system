@@ -3,6 +3,8 @@ from scapy.all import sniff, IP, TCP, UDP
 
 logger = logging.getLogger(__name__)
 
+IFACE = "\\Device\\NPF_{C03C27D4-F564-4323-A649-D28FA00A09F4}"
+
 def process_packet(packet, packet_list):
     if IP in packet:
         packet_list.append({
@@ -18,6 +20,7 @@ def capture_packets(duration=10):
     packet_list = []
     try:
         sniff(
+            iface=IFACE,
             filter="tcp or udp",
             timeout=duration,
             prn=lambda pkt: process_packet(pkt, packet_list),
