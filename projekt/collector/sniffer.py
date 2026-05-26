@@ -7,6 +7,8 @@ IFACE = "\\Device\\NPF_{C03C27D4-F564-4323-A649-D28FA00A09F4}"
 
 def process_packet(packet, packet_list):
     if IP in packet:
+        tcp_flags = str(packet[TCP].flags) if TCP in packet else ""
+
         packet_list.append({
             "src_ip": packet[IP].src,
             "dst_ip": packet[IP].dst,
@@ -14,9 +16,10 @@ def process_packet(packet, packet_list):
             "protocol": "TCP" if TCP in packet else "UDP" if UDP in packet else "OTHER",
             "src_port": packet[TCP].sport if TCP in packet else packet[UDP].sport if UDP in packet else 0,
             "dst_port": packet[TCP].dport if TCP in packet else packet[UDP].dport if UDP in packet else 0,
+            "tcp_flags": tcp_flags,  # ← NOWE
         })
 
-def capture_packets(duration=10):
+def capture_packets(duration=1):
     packet_list = []
     try:
         sniff(
