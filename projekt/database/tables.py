@@ -17,6 +17,10 @@ class NetworkMetric(Base):
     unique_connections = Column(Integer)
     in_out_ratio = Column(Float)
     dominant_port = Column(Integer)
+    syn_count = Column(Integer)
+    ack_count = Column(Integer)
+    rst_count = Column(Integer)
+    fin_count = Column(Integer)
 
 class ModelInfo(Base):
     __tablename__ = "model_info"
@@ -33,7 +37,7 @@ class Anomaly(Base):
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     anomaly_score = Column(Float)
-    severity_level = Column(String(10))  #low/medium/high
+    severity_level = Column(String(10))
     description = Column(Text)
     metric_id = Column(Integer, ForeignKey("network_metrics.id"))
     model_id = Column(Integer, ForeignKey("model_info.id"))
@@ -43,7 +47,7 @@ class Alert(Base):
     id = Column(Integer, primary_key=True)
     anomaly_id = Column(Integer, ForeignKey("anomalies.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String(20), default="new")  #new/acknowledged/closed
+    status = Column(String(20), default="new")
 
 class User(Base):
     __tablename__ = "users"
@@ -68,5 +72,5 @@ class SystemLog(Base):
     __tablename__ = "system_logs"
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    log_level = Column(String(10))  #INFO/WARNING/ERROR
+    log_level = Column(String(10))
     message = Column(Text)
