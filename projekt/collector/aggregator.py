@@ -25,11 +25,27 @@ def aggregate_and_save(packet_list):
     udp_count = sum(1 for p in packet_list if p["protocol"] == "UDP")
     unique_connections = len(set((p["src_ip"], p["dst_ip"]) for p in packet_list))
     incoming = sum(1 for p in packet_list if p["dst_ip"].startswith("192.168.0"))
-    outgoing = total - incoming
     in_out_ratio = round(incoming / total, 2) if total > 0 else 0
     port_counter = Counter(p["dst_port"] for p in packet_list)
-    most_common = port_counter.most_common(1) 
+    most_common = port_counter.most_common(1)
     dominant_port = most_common[0][0] if most_common else 0
+
+    syn_count = sum(
+        1 for p in packet_list
+        if p["tcp_flags"] and "S" in p["tcp_flags"] and "A" not in p["tcp_flags"]
+    )
+    ack_count = sum(
+        1 for p in packet_list
+        if p["tcp_flags"] and "A" in p["tcp_flags"]
+    )
+    rst_count = sum(
+        1 for p in packet_list
+        if p["tcp_flags"] and "R" in p["tcp_flags"]
+    )
+    fin_count = sum(
+        1 for p in packet_list
+        if p["tcp_flags"] and "F" in p["tcp_flags"]
+    )
 
     metric = NetworkMetric(
         packets_count=total,
@@ -42,13 +58,17 @@ def aggregate_and_save(packet_list):
         unique_connections=unique_connections,
         in_out_ratio=in_out_ratio,
         dominant_port=dominant_port,
+        syn_count=syn_count,
+        ack_count=ack_count,
+        rst_count=rst_count,
+        fin_count=fin_count,
     )
 
     session = SessionLocal()
     try:
         session.add(metric)
         session.commit()
-        msg = f"Metric saved: {total} packets, {unique_ips} unique IPs"
+        msg = f"Metric saved: {total} packets, {unique_ips} unique IPs, SYN: {syn_count}, RST: {rst_count}"
         logger.info(msg)
         save_log_to_db(session, "INFO", msg)
     except Exception as e:
