@@ -1,26 +1,29 @@
 import logging
+import time
 from scapy.all import sniff, IP, TCP, UDP
 
 logger = logging.getLogger(__name__)
 
-IFACE = "\\Device\\NPF_{C03C27D4-F564-4323-A649-D28FA00A09F4}"
+IFACE = "wlo1"
 
 def process_packet(packet, packet_list):
     if IP in packet:
         tcp_flags = str(packet[TCP].flags) if TCP in packet else ""
 
         packet_list.append({
+            "timestamp": time.time(),
             "src_ip": packet[IP].src,
             "dst_ip": packet[IP].dst,
             "size": len(packet),
             "protocol": "TCP" if TCP in packet else "UDP" if UDP in packet else "OTHER",
             "src_port": packet[TCP].sport if TCP in packet else packet[UDP].sport if UDP in packet else 0,
             "dst_port": packet[TCP].dport if TCP in packet else packet[UDP].dport if UDP in packet else 0,
-            "tcp_flags": tcp_flags,  # ← NOWE
+            "tcp_flags": tcp_flags
         })
 
 def capture_packets(duration=1):
     packet_list = []
+
     try:
         sniff(
             iface=IFACE,
@@ -32,4 +35,5 @@ def capture_packets(duration=1):
         logger.info(f"Captured {len(packet_list)} packets")
     except Exception as e:
         logger.error(f"Error during packet capture: {e}")
+
     return packet_list
