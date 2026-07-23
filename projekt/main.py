@@ -1,7 +1,10 @@
 import time
 import logging
+
 from collector.sniffer import capture_packets
-from collector.aggregator import aggregate_and_save
+from collector.window_manager import SlidingWindow
+from features.aggregator import aggregate_packets
+from database.repository import save_metric
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,31 +20,34 @@ logger = logging.getLogger(__name__)
 WINDOW_SIZE = 10
 STEP_SIZE = 2
 
-logger.info("System started. Beginning data collection (sliding window mode)...")
-
-buffer = []
+window = SlidingWindow(window_size=WINDOW_SIZE)
 last_aggregation = time.time()
+
+logger.info("System started. Beginning data collection...")
 
 try:
     while True:
-        try:
-            new_packets = capture_packets(duration=1)
-            now = time.time()
+        new_packets = capture_packets(duration=1)
+        now = time.time()
 
-            for packet in new_packets:
-                packet["timestamp"] = now
-                buffer.append(packet)
+        window.add_packets(new_packets, now)
 
-            buffer = [p for p in buffer if now - p["timestamp"] <= WINDOW_SIZE]
+        if now - last_aggregation >= STEP_SIZE:
+            packets_in_window = window.get_packets()
 
-            if now - last_aggregation >= STEP_SIZE:
-                logger.info(f"Aggregating window: {len(buffer)} packets in last {WINDOW_SIZE}s")
-                aggregate_and_save(buffer)
-                last_aggregation = now
+            logger.info(
+                f"Aggregating {len(packets_in_window)} packets from last {WINDOW_SIZE} seconds"
+            )
 
-        except Exception as e:
-            logger.error(f"Unexpected error in main loop: {e}")
+            metric_data = aggregate_packets(packets_in_window)
+
+            if metric_data:
+                save_metric(metric_data)
+
+            last_aggregation = now
 
 except KeyboardInterrupt:
     logger.info("System stopped by user.")
     print("\nSystem stopped.")
+except Exception as e:
+    logger.error(f"Unexpected error in main loop: {e}")
