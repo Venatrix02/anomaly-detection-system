@@ -1,29 +1,38 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Float, Double, DateTime, Boolean, Text, ForeignKey
 from datetime import datetime
 from .connection import Base
 
+
 class NetworkMetric(Base):
     __tablename__ = "network_metrics"
+
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+    window_start = Column(Double)
+    window_end = Column(Double)
+
     packets_count = Column(Integer)
-    connections_count = Column(Integer)
     unique_ips = Column(Integer)
     unique_ports = Column(Integer)
     avg_packet_size = Column(Float)
+
     tcp_ratio = Column(Float)
     udp_ratio = Column(Float)
+    other_ratio = Column(Float)
+
     unique_connections = Column(Integer)
-    in_out_ratio = Column(Float)
     dominant_port = Column(Integer)
-    syn_count = Column(Integer)
-    ack_count = Column(Integer)
-    rst_count = Column(Integer)
-    fin_count = Column(Integer)
+
+    synchronization_packets_count = Column(Integer)
+    acknowledgment_packets_count = Column(Integer)
+    reset_packets_count = Column(Integer)
+    finish_packets_count = Column(Integer)
+
 
 class ModelInfo(Base):
     __tablename__ = "model_info"
+
     id = Column(Integer, primary_key=True)
     model_name = Column(String(100))
     algorithm_type = Column(String(50))
@@ -32,8 +41,10 @@ class ModelInfo(Base):
     accuracy = Column(Float)
     is_active = Column(Boolean, default=False)
 
+
 class Anomaly(Base):
     __tablename__ = "anomalies"
+
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     anomaly_score = Column(Float)
@@ -42,15 +53,19 @@ class Anomaly(Base):
     metric_id = Column(Integer, ForeignKey("network_metrics.id"))
     model_id = Column(Integer, ForeignKey("model_info.id"))
 
+
 class Alert(Base):
     __tablename__ = "alerts"
+
     id = Column(Integer, primary_key=True)
     anomaly_id = Column(Integer, ForeignKey("anomalies.id"))
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(20), default="new")
 
+
 class User(Base):
     __tablename__ = "users"
+
     id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True)
     password_hash = Column(String(255))
@@ -58,8 +73,10 @@ class User(Base):
     last_login = Column(DateTime)
     is_active = Column(Boolean, default=True)
 
+
 class Report(Base):
     __tablename__ = "reports"
+
     id = Column(Integer, primary_key=True)
     generated_at = Column(DateTime, default=datetime.utcnow)
     period_start = Column(DateTime)
@@ -68,8 +85,10 @@ class Report(Base):
     file_path = Column(String(255))
     summary = Column(Text)
 
+
 class SystemLog(Base):
     __tablename__ = "system_logs"
+
     id = Column(Integer, primary_key=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
     log_level = Column(String(10))
