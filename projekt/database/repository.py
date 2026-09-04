@@ -4,10 +4,14 @@ from database.tables import NetworkMetric, SystemLog
 
 logger = logging.getLogger(__name__)
 
+#zapisanie jednego wpisu do logu w bazie danych
+
 def save_log(session, level, message):
     log = SystemLog(log_level=level, message=message)
     session.add(log)
     session.commit()
+
+#zapisanie jednego podsumowania ruchu sieciowego do bazy danych
 
 def save_metric(metric_data):
     if not metric_data:

@@ -1,5 +1,7 @@
 from collections import Counter
 
+#tworzenie podsumowania z listy pakietów
+
 def aggregate_packets(packet_list):
     if not packet_list:
         return None
@@ -22,6 +24,8 @@ def aggregate_packets(packet_list):
     udp_packets = sum(1 for p in packet_list if p["protocol"] == "UDP")
     other_packets = sum(1 for p in packet_list if p["protocol"] == "OTHER")
 
+#liczenie, ile jest różnych połączeń (unikalnych kompinacji adresów IP, portów i protokołu)
+
     unique_connections = len(
         set(
             (
@@ -35,11 +39,15 @@ def aggregate_packets(packet_list):
         )
     )
 
+#szukanie portu, który pojawiał się najczęściej
+
     destination_port_counter = Counter(
-        p["dst_port"] for p in packet_list if p["dst_port"] != 0
+        p["dst_port"] for p in packet_list if p["dst_port"] != 0 #pominięcie 0, które oznacza brak portu
     )
     most_common_port = destination_port_counter.most_common(1)
     dominant_destination_port = most_common_port[0][0] if most_common_port else 0
+
+#liczenie różnych sygnałów TCP
 
     synchronization_packets_count = sum(
         1 for p in packet_list

@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, Double, DateTime, Boolean
 from datetime import datetime
 from .connection import Base
 
+#tabela z podsumowaniami ruchu sieciowego (jedno podsumowanie dla każdego okresu czasu - co 10 sekund ruchu)
 
 class NetworkMetric(Base):
     __tablename__ = "network_metrics"
@@ -29,6 +30,7 @@ class NetworkMetric(Base):
     reset_packets_count = Column(Integer)
     finish_packets_count = Column(Integer)
 
+#tabela z informacjami o modelu uczenia maszynowego wykrywającego anomalie
 
 class ModelInfo(Base):
     __tablename__ = "model_info"
@@ -41,6 +43,7 @@ class ModelInfo(Base):
     accuracy = Column(Float)
     is_active = Column(Boolean, default=False)
 
+#tabela z wykrytymi anomaliami w ruchu sieciowym
 
 class Anomaly(Base):
     __tablename__ = "anomalies"
@@ -53,6 +56,7 @@ class Anomaly(Base):
     metric_id = Column(Integer, ForeignKey("network_metrics.id"))
     model_id = Column(Integer, ForeignKey("model_info.id"))
 
+#tabela z alertami generowanymi w przypadku wykrycia anomalii
 
 class Alert(Base):
     __tablename__ = "alerts"
@@ -62,6 +66,7 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     status = Column(String(20), default="new")
 
+#tabela z użytkownikami systemu i ich danymi logowania
 
 class User(Base):
     __tablename__ = "users"
@@ -73,6 +78,7 @@ class User(Base):
     last_login = Column(DateTime)
     is_active = Column(Boolean, default=True)
 
+#tabela z raportami
 
 class Report(Base):
     __tablename__ = "reports"
@@ -85,6 +91,7 @@ class Report(Base):
     file_path = Column(String(255))
     summary = Column(Text)
 
+#tabela z logami systemowymi
 
 class SystemLog(Base):
     __tablename__ = "system_logs"
