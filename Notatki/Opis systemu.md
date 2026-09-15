@@ -32,12 +32,18 @@
 
 ## **c) Moduł 3 - uczenie modelu:**
 
-* System uczy się, jak wygląda normalny ruch sieciowy, korzystając z danych historycznych.
+* System uczy się, jak wygląda normalny ruch sieciowy, korzystając z danych historycznych zapisanych w bazie danych (tabela network_metrics).
 * Tworzy matematyczny model zachowania sieci, który pozwala wykrywać anomalie.
-* Do wyboru są różne algorytmy: Isolation Forest (model izoluje anomalie, bo różnią się od większości danych), One-Class SVM (model uczy się granicy obejmującej większość normalnych danych, wszystko poza nią to anomalia)lub metoda progowa (jeśli wartość wychodzi poza ustalony przedział średnia ± odchylenie standardowe, uznaje się ją za anomalię).
+* System trenuje równolegle trzy różne algorytmy, umożliwiając późniejsze porównanie ich skuteczności:
+  - Isolation Forest – model izoluje anomalie, ponieważ różnią się one od większości danych.
+  - One-Class SVM – model uczy się granicy obejmującej większość normalnych danych; wszystko poza nią uznawane jest za anomalię.
+  - Metoda progowa – jeśli wartość cechy wychodzi poza ustalony przedział średnia ± odchylenie standardowe, uznaje się ją za anomalię.
+* Dane treningowe mogą być zbierane automatycznie przez wbudowany generator ruchu sieciowego (oparty na bibliotece Selenium).
+* Wytrenowane modele są zapisywane do plików w formacie pickle, a informacje o nich (nazwa, typ algorytmu, data treningu, parametry, flaga aktywności) są rejestrowane w tabeli model_info w bazie danych.
+* Dzięki temu system umożliwia przełączanie aktywnego modelu wykrywającego anomalie bez konieczności ponownego trenowania.
 * Model trenuje się na danych normalnych, a następnie testuje na nowych danych, aby sprawdzić skuteczność.
 * Po wytrenowaniu model jest gotowy do analizowania nowych danych w czasie rzeczywistym.
-* Narzędzia: Python i Scikit-Learn.
+* Narzędzia: Python, Scikit-Learn, Pandas, NumPy, joblib, Selenium.
 
 ## **d) Moduł 4 - wykrywanie anomalii:**
 
