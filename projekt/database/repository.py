@@ -38,3 +38,55 @@ def save_metric(metric_data):
 
     finally:
         session.close()
+
+#zapisanie wykrytej anomalii do bazy danych
+def save_anomaly(anomaly_data):
+    if not anomaly_data:
+        return None
+    session = SessionLocal()
+    try:
+        from database.tables import Anomaly
+        anomaly = Anomaly(**anomaly_data)
+        session.add(anomaly)
+        session.commit()
+        logger.info(f"Anomaly saved: score={anomaly_data['anomaly_score']}, severity={anomaly_data['severity_level']}")
+        return anomaly.id
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error saving anomaly: {e}")
+        return None
+    finally:
+        session.close()
+
+
+#zapisanie alertu do bazy danych
+
+def save_alert(anomaly_id):
+    if not anomaly_id:
+        return
+    session = SessionLocal()
+    try:
+        from database.tables import Alert
+        alert = Alert(anomaly_id=anomaly_id, status="new")
+        session.add(alert)
+        session.commit()
+        logger.info(f"Alert saved for anomaly ID: {anomaly_id}")
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error saving alert: {e}")
+    finally:
+        session.close()
+
+
+#wyznaczanie poziomu istotności na podstawie anomaly score
+
+def determine_severity(score):
+
+    #im bardziej ujemny score, tym większa anomalia
+    
+    if score < -0.5:
+        return "high"
+    elif score < -0.2:
+        return "medium"
+    else:
+        return "low"
