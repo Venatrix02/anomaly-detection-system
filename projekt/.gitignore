@@ -8,4 +8,25 @@ __pycache__/
 models/*.pkl
 *.sql
 *.csv
-chromedriver
+chromedriverS
+#pliki wygenerowane przez train_model.py
+models/model_metadata.json
+
+#ustawienia edytora
+.vscode/
+.idea/
+
+#logi
+*.log
+system.log
+
+#pliki wygenerowane przez train_model.py
+models/model_metadata.json
+
+#ustawienia edytora
+.vscode/
+.idea/
+
+#logi
+*.log
+system.log

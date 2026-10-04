@@ -34,18 +34,21 @@
 
 import logging
 import time
+import os
 from scapy.all import sniff, IP, TCP, UDP
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-IFACE = "wlo1" #karta sieciowa, z której zbieram ruch
+IFACE = os.getenv("SNIFFER_IFACE", "wlo1") #interfejs sieciowy pobierany z .env
 
 #wyciąganie najważniejszych informacji z pakietów
 
 def process_packet(packet, packet_list):
     if IP in packet:
         tcp_flags = str(packet[TCP].flags) if TCP in packet else ""
-
         packet_list.append({
             "timestamp": time.time(),
             "src_ip": packet[IP].src,
@@ -61,7 +64,6 @@ def process_packet(packet, packet_list):
 
 def capture_packets(duration=1):
     packet_list = []
-
     try:
         sniff(
             iface=IFACE,
@@ -73,8 +75,12 @@ def capture_packets(duration=1):
         logger.info(f"Captured {len(packet_list)} packets")
     except Exception as e:
         logger.error(f"Error during packet capture: {e}")
-
     return packet_list
+
+#bezpieczne zatrzymanie sniffera
+
+def stop_sniffer():
+    logger.info("Sniffer will stop after current capture cycle.")
 
 ```
 
@@ -131,8 +137,9 @@ Base = declarative_base()
 ```py
 
 import logging
+from datetime import datetime, timezone, timedelta
 from database.connection import SessionLocal
-from database.tables import NetworkMetric, SystemLog
+from database.tables import NetworkMetric, SystemLog, Alert, Anomaly
 
 logger = logging.getLogger(__name__)
 
@@ -144,78 +151,92 @@ def save_log(session, level, message):
     session.commit()
 
 #zapisanie jednego podsumowania ruchu sieciowego do bazy danych
-
 def save_metric(metric_data):
     if not metric_data:
-        return
-
-    session = SessionLocal()
-
-    try:
-        metric = NetworkMetric(**metric_data)
-        session.add(metric)
-        session.commit()
-
-        msg = (
-            f"Metric saved: {metric_data['packets_count']} packets, "
-            f"{metric_data['unique_ips']} unique IPs"
-        )
-        logger.info(msg)
-        save_log(session, "INFO", msg)
-
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error saving metric: {e}")
-        save_log(session, "ERROR", str(e))
-
-    finally:
-        session.close()
+        return None
+    with SessionLocal() as session:
+        try:
+            metric = NetworkMetric(**metric_data)
+            session.add(metric)
+            session.commit()
+            session.refresh(metric)
+            msg = (
+                f"Metric saved: {metric_data['packets_count']} packets, "
+                f"{metric_data['unique_ips']} unique IPs"
+            )
+            logger.info(msg)
+            save_log(session, "INFO", msg)
+            return metric.id
+        except Exception as e:
+            session.rollback()
+            logger.error("Error saving metric: " + str(e))
+            save_log(session, "ERROR", str(e))
+            return None
 
 #zapisanie wykrytej anomalii do bazy danych
+
 def save_anomaly(anomaly_data):
     if not anomaly_data:
         return None
-    session = SessionLocal()
-    try:
-        from database.tables import Anomaly
-        anomaly = Anomaly(**anomaly_data)
-        session.add(anomaly)
-        session.commit()
-        logger.info(f"Anomaly saved: score={anomaly_data['anomaly_score']}, severity={anomaly_data['severity_level']}")
-        return anomaly.id
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error saving anomaly: {e}")
-        return None
-    finally:
-        session.close()
+    with SessionLocal() as session:
+        try:
+            anomaly = Anomaly(**anomaly_data)
+            session.add(anomaly)
+            session.commit()
+            session.refresh(anomaly)
+            logger.info("Anomaly saved: score=" + str(anomaly_data['anomaly_score']) + ", severity=" + str(anomaly_data['severity_level']))
+            return anomaly.id
+        except Exception as e:
+            session.rollback()
+            logger.error("Error saving anomaly: " + str(e))
+            return None
 
+#zapisanie alertu do bazy danych, z uwzględnieniem cooldownu dla alertów o tym samym poziomie istotności
 
-#zapisanie alertu do bazy danych
-
-def save_alert(anomaly_id):
+def save_alert(anomaly_id, severity_level):
     if not anomaly_id:
         return
-    session = SessionLocal()
-    try:
-        from database.tables import Alert
-        alert = Alert(anomaly_id=anomaly_id, status="new")
-        session.add(alert)
-        session.commit()
-        logger.info(f"Alert saved for anomaly ID: {anomaly_id}")
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error saving alert: {e}")
-    finally:
-        session.close()
+    with SessionLocal() as session:
+        try:
 
+            #sprawdzanie, czy istnieje już alert o tym samym poziomie istotności w ciągu ostatnich 5 minut
 
-#wyznaczanie poziomu istotności na podstawie anomaly score
+            recent_alert = session.query(Alert).join(Anomaly).filter(
+                Anomaly.severity_level == severity_level,
+                Alert.status == "new",
+                Alert.created_at >= datetime.now(timezone.utc) - timedelta(minutes=5)
+            ).first()
+
+            if recent_alert:
+
+                #aktualizacja czasu ostatniego wystąpienia alertu, jeśli istnieje już alert o tym samym poziomie istotności
+                
+                recent_alert.last_seen = datetime.now(timezone.utc)
+                session.commit()
+                logger.info("Alert cooldown: updated last_seen for severity " + severity_level)
+            else:
+                
+                #tworzenie nowego alertu
+                
+                new_alert = Alert(
+                    anomaly_id=anomaly_id,
+                    status="new",
+                    created_at=datetime.now(timezone.utc),
+                    last_seen=datetime.now(timezone.utc)
+                )
+                session.add(new_alert)
+                session.commit()
+                logger.info("Alert saved for severity: " + severity_level)
+        except Exception as e:
+            session.rollback()
+            logger.error("Error saving alert: " + str(e))
+
+#wyznaczanie poziomu istotności anomalii na podstawie anomaly score
 
 def determine_severity(score):
 
-    #im bardziej ujemny score, tym większa anomalia
-    
+    #im bardziej ujemnty score, tym większa anomalia
+
     if score < -0.5:
         return "high"
     elif score < -0.2:
@@ -230,82 +251,75 @@ def determine_severity(score):
 ```py
 
 from sqlalchemy import Column, Integer, String, Float, Double, DateTime, Boolean, Text, ForeignKey
-from datetime import datetime
+from datetime import datetime, timezone
 from .connection import Base
 
-#tabela z podsumowaniami ruchu sieciowego (jedno podsumowanie dla każdego okresu czasu - co 10 sekund ruchu)
+#tabela z podsumowaniami ruchu sieciowego
 
 class NetworkMetric(Base):
     __tablename__ = "network_metrics"
-
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     window_start = Column(Double)
     window_end = Column(Double)
-
     packets_count = Column(Integer)
     unique_ips = Column(Integer)
     unique_ports = Column(Integer)
     avg_packet_size = Column(Float)
-
     tcp_ratio = Column(Float)
     udp_ratio = Column(Float)
     other_ratio = Column(Float)
-
     unique_connections = Column(Integer)
     dominant_port = Column(Integer)
-
     synchronization_packets_count = Column(Integer)
     acknowledgment_packets_count = Column(Integer)
     reset_packets_count = Column(Integer)
     finish_packets_count = Column(Integer)
+    packet_size_std = Column(Float, default=0.0)
+    syn_to_ack_ratio = Column(Float, default=0.0)
 
-#tabela z informacjami o modelu uczenia maszynowego wykrywającego anomalie
+#tabela z informacjami o modelu ML
 
 class ModelInfo(Base):
     __tablename__ = "model_info"
-
     id = Column(Integer, primary_key=True)
     model_name = Column(String(100))
     algorithm_type = Column(String(50))
-    training_date = Column(DateTime)
+    training_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     parameters = Column(Text)
     accuracy = Column(Float)
-    is_active = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=False, index=True)
 
-#tabela z wykrytymi anomaliami w ruchu sieciowym
+#tabela z wykrytymi anomaliami
 
 class Anomaly(Base):
     __tablename__ = "anomalies"
-
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     anomaly_score = Column(Float)
-    severity_level = Column(String(10))
+    severity_level = Column(String(10), index=True)
     description = Column(Text)
     metric_id = Column(Integer, ForeignKey("network_metrics.id"))
     model_id = Column(Integer, ForeignKey("model_info.id"))
 
-#tabela z alertami generowanymi w przypadku wykrycia anomalii
+#tabela z alertami
 
 class Alert(Base):
     __tablename__ = "alerts"
-
     id = Column(Integer, primary_key=True)
     anomaly_id = Column(Integer, ForeignKey("anomalies.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    status = Column(String(20), default="new")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    status = Column(String(20), default="new", index=True)
 
-#tabela z użytkownikami systemu i ich danymi logowania
+#tabela z użytkownikami
 
 class User(Base):
     __tablename__ = "users"
-
     id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True)
     password_hash = Column(String(255))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_login = Column(DateTime)
     is_active = Column(Boolean, default=True)
 
@@ -313,9 +327,8 @@ class User(Base):
 
 class Report(Base):
     __tablename__ = "reports"
-
     id = Column(Integer, primary_key=True)
-    generated_at = Column(DateTime, default=datetime.utcnow)
+    generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     period_start = Column(DateTime)
     period_end = Column(DateTime)
     generated_by = Column(Integer, ForeignKey("users.id"))
@@ -326,9 +339,8 @@ class Report(Base):
 
 class SystemLog(Base):
     __tablename__ = "system_logs"
-
     id = Column(Integer, primary_key=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     log_level = Column(String(10))
     message = Column(Text)
 
@@ -339,6 +351,7 @@ class SystemLog(Base):
 ```py
 
 from collections import Counter
+import numpy as np
 
 #tworzenie podsumowania z listy pakietów
 
@@ -347,24 +360,21 @@ def aggregate_packets(packet_list):
         return None
 
     total_packets = len(packet_list)
-
     unique_ips = len(
         set(p["src_ip"] for p in packet_list) |
         set(p["dst_ip"] for p in packet_list)
     )
-
     unique_ports = len(
         set(p["src_port"] for p in packet_list) |
         set(p["dst_port"] for p in packet_list)
     )
-
     average_packet_size = sum(p["size"] for p in packet_list) / total_packets
 
     tcp_packets = sum(1 for p in packet_list if p["protocol"] == "TCP")
     udp_packets = sum(1 for p in packet_list if p["protocol"] == "UDP")
     other_packets = sum(1 for p in packet_list if p["protocol"] == "OTHER")
 
-#liczenie, ile jest różnych połączeń (unikalnych kompinacji adresów IP, portów i protokołu)
+    #liczenie, ile jest różnych połączeń
 
     unique_connections = len(
         set(
@@ -379,35 +389,44 @@ def aggregate_packets(packet_list):
         )
     )
 
-#szukanie portu, który pojawiał się najczęściej
+    #szukanie portu, który pojawiał się najczęściej
 
     destination_port_counter = Counter(
-        p["dst_port"] for p in packet_list if p["dst_port"] != 0 #pominięcie 0, które oznacza brak portu
+        p["dst_port"] for p in packet_list if p["dst_port"] != 0
     )
     most_common_port = destination_port_counter.most_common(1)
     dominant_destination_port = most_common_port[0][0] if most_common_port else 0
 
-#liczenie różnych sygnałów TCP
+    #liczenie różnych sygnałów TCP
 
     synchronization_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "S" in p["tcp_flags"] and "A" not in p["tcp_flags"]
     )
-
     acknowledgment_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "A" in p["tcp_flags"]
     )
-
     reset_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "R" in p["tcp_flags"]
     )
-
     finish_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "F" in p["tcp_flags"]
     )
+
+    #odchylenie standardowe rozmiaru pakietu
+
+    packet_sizes = [p["size"] for p in packet_list]
+    packet_size_std = float(np.std(packet_sizes)) if packet_sizes else 0.0
+
+    #stosunek SYN do ACK (wykrywanie SYN Flood)
+ 
+    if acknowledgment_packets_count > 0:
+        syn_to_ack_ratio = synchronization_packets_count / acknowledgment_packets_count
+    else:
+        syn_to_ack_ratio = float(synchronization_packets_count)
 
     window_start = min(p["timestamp"] for p in packet_list)
     window_end = max(p["timestamp"] for p in packet_list)
@@ -427,7 +446,9 @@ def aggregate_packets(packet_list):
         "synchronization_packets_count": synchronization_packets_count,
         "acknowledgment_packets_count": acknowledgment_packets_count,
         "reset_packets_count": reset_packets_count,
-        "finish_packets_count": finish_packets_count
+        "finish_packets_count": finish_packets_count,
+        "packet_size_std": round(packet_size_std, 2),
+        "syn_to_ack_ratio": round(syn_to_ack_ratio, 4)
     }
 
 ```
@@ -444,116 +465,6 @@ from database.tables import *
 Base.metadata.create_all(engine)
 
 print("All tables have been created")
-
-```
-
-## **main.py**
-
-```py
-
-import time
-import logging
-
-from collector.sniffer import capture_packets
-from collector.window_manager import SlidingWindow
-from features.aggregator import aggregate_packets
-from database.repository import save_metric, save_anomaly, save_alert, determine_severity
-from detector import AnomalyDetector
-
-#ustawienia logowania
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("system.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-WINDOW_SIZE = 10 #ile sekund ruchu sieciowego ma być brane pod uwagę przy tworzeniu podsumowania
-STEP_SIZE = 2 #co ile sekund jest robione podsumowanie i zapisywane do bazy
-
-window = SlidingWindow(window_size=WINDOW_SIZE)
-last_aggregation = time.time()
-
-#wczytanie modelu wykrywającego anomalie
-
-logger.info("Loading anomaly detection model...")
-detector = AnomalyDetector()
-
-logger.info("System started. Beginning data collection...")
-
-try:
-
-    #zbieranie nowych pakietów z ostatniej sekundy
-
-    while True:
-        new_packets = capture_packets(duration=1)
-        now = time.time()
-
-        #dodawanie nowych pakietów do okna czasowego i usuwanie starych
-
-        window.add_packets(new_packets, now)
-
-        #po minimalnym czasie określonym w STEP_SIZE, tworzenie podsumowania z pakietów w oknie czasowym i zapisywanie go
-
-        if now - last_aggregation >= STEP_SIZE:
-            packets_in_window = window.get_packets()
-            logger.info(
-                f"Aggregating {len(packets_in_window)} packets from last {WINDOW_SIZE} seconds"
-            )
-            metric_data = aggregate_packets(packets_in_window)
-            
-            if metric_data:
-
-                #zapisanie metryki do bazy
-
-                save_metric(metric_data)
-                
-                #wykrywanie anomalii
-
-                is_anomaly, score, model_id = detector.predict(metric_data)
-                
-                if is_anomaly:
-                    logger.warning(f"🚨 ANOMALY DETECTED! Score: {score:.4f}")
-                    
-                    #wyznaczanie poziomu istotności
-
-                    severity = determine_severity(score)
-                    
-                    #przygotowanie danych anomalii do zapisu
-
-                    anomaly_data = {
-                        'anomaly_score': score,
-                        'severity_level': severity,
-                        'description': f"Anomaly detected by {detector.algorithm_type}",
-                        'metric_id': None,  #tutaj trzeba by pobrać ID ostatnio zapisanej metryki
-                        'model_id': model_id
-                    }
-                    
-                    #zapisanie anomalii do bazy
-
-                    anomaly_id = save_anomaly(anomaly_data)
-                    
-                    #zapisanie alertu do bazy
-
-                    if anomaly_id:
-                        save_alert(anomaly_id)
-                
-            last_aggregation = now
-
-#użytkownik sam zatrzymał program (Ctrl+C)
-
-except KeyboardInterrupt:
-    logger.info("System stopped by user.")
-    print("\nSystem stopped.")
-
-#zapisywanie błędów do logu w przypadku nieoczekiwanych wyjątków
-
-except Exception as e:
-    logger.error(f"Unexpected error in main loop: {e}")
 
 ```
 
@@ -702,7 +613,7 @@ class AnomalyDetector:
 
 scapy==2.7.0  
 SQLAlchemy==2.0.48  
-python-dotenv==1.2.2  
+python-dotenv==1.2.  
 PyMySQL==1.1.1  
 pandas==3.0.1  
 numpy==2.4.2  
@@ -724,9 +635,7 @@ import time
 import random
 import logging
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 
 #konfiguracja logowania
 
@@ -737,6 +646,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 #lista stron
+
 WEBSITES = [
     "https://www.reddit.com",
     "https://www.pinterest.com",
@@ -756,44 +666,180 @@ WEBSITES = [
     "https://www.allegro.pl",
 ]
 
+
 def generate_traffic(duration_hours=2):
-    
+
+    #konfiguracja przegladarki Chrome
+
+    chrome_options = Options()
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--window-size=1920,1080")
+    prefs = {"profile.managed_default_content_settings.images": 2}
+    chrome_options.add_experimental_option("prefs", prefs)
+
+    logger.info("Uruchamianie przegladarki Chrome...")
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+    except Exception as e:
+        logger.error(f"Nie udalo sie uruchomic Chrome: {e}")
+        logger.info("Probuję alternatywna metode...")
+        chrome_options = Options()
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=chrome_options)
+
+    end_time = time.time() + (duration_hours * 3600)
+    visits_count = 0
+    start_time = time.time()
+    logger.info(f"Generowanie ruchu rozpoczete na {duration_hours} godzin(y)...")
+
+    try:
+        while time.time() < end_time:
+
+            #wybor losowej strony
+
+            url = random.choice(WEBSITES)
+            try:
+                logger.info(f"Odwiedzam: {url}")
+                driver.get(url)
+                visits_count += 1
+
+                #losowy czas czytania strony (miedzy 5 a 30 sekund)
+
+                reading_time = random.uniform(5, 30)
+                time.sleep(reading_time)
+
+                #klikniecie (czasami) w losowy link na stronie (30% szans)
+
+                if random.random() < 0.3:
+                    try:
+                        links = driver.find_elements("tag name", "a")
+                        if links:
+                            random_link = random.choice(links[:20])
+                            href = random_link.get_attribute("href")
+                            if href and href.startswith("http"):
+                                logger.info(f"  -> Klikam link: {href[:80]}")
+                                driver.get(href)
+                                visits_count += 1
+                                time.sleep(random.uniform(3, 15))
+                    except Exception:
+                        pass  #ignorowanie bledow klikania
+
+                #losowa przerwa miedzy stronami (miedzy 2 a 10 sekund)
+
+                pause = random.uniform(2, 10)
+                time.sleep(pause)
+
+                # wyswietlenie postepu co 10 odwiedzin
+
+                if visits_count % 10 == 0:
+                    elapsed = (time.time() - start_time) / 60
+                    logger.info(f"Postep: {visits_count} odwiedzin w {elapsed:.1f} minut")
+            except Exception as e:
+                logger.warning(f"Blad podczas odwiedzania {url}: {e}")
+                time.sleep(5)
+
+    except KeyboardInterrupt:
+        logger.info("Generowanie ruchu zatrzymane przez uzytkownika.")
+    finally:
+        driver.quit()
+        elapsed_total = (time.time() - start_time) / 60
+        logger.info(f"Generowanie ruchu zakonczone. Lacznie odwiedzin: {visits_count} w {elapsed_total:.1f} minut")
+
+if __name__ == "__main__":
+    generate_traffic(duration_hours=0.25)
+
+```
+## **train_model.py**
+
+```py
+
+import time
+import random
+import logging
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+#konfiguracja logowania
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+#lista stron
+
+WEBSITES = [
+    "https://www.reddit.com",
+    "https://www.pinterest.com",
+    "https://www.youtube.com",
+    "https://shinden.pl",
+    "https://www.webtoons.com",
+    "https://lubimyczytac.pl",
+    "https://www.wikipedia.org",
+    "https://www.khanacademy.org",
+    "https://github.com",
+    "https://stackoverflow.com",
+    "https://developer.mozilla.org",
+    "https://www.canva.com",
+    "https://www.bbc.com",
+    "https://www.onet.pl",
+    "https://news.ycombinator.com",
+    "https://www.allegro.pl",
+]
+
+
+def generate_traffic(duration_hours=2):
+
     #konfiguracja przeglądarki Chrome
 
     chrome_options = Options()
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    
-    logger.info("Uruchamianie przeglądarki Chrome...")
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=chrome_options
-    )
-    
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--window-size=1920,1080")
+    prefs = {"profile.managed_default_content_settings.images": 2}
+    chrome_options.add_experimental_option("prefs", prefs)
+
+    logger.info("Uruchamianie przegladarki Chrome...")
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+    except Exception as e:
+        logger.error(f"Nie udalo sie uruchomic Chrome: {e}")
+        logger.info("Probuję alternatywna metode...")
+        chrome_options = Options()
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        driver = webdriver.Chrome(options=chrome_options)
+
     end_time = time.time() + (duration_hours * 3600)
     visits_count = 0
     start_time = time.time()
-    
-    logger.info(f"Generowanie ruchu rozpoczęte na {duration_hours} godzin(y)...")
-    
+    logger.info(f"Generowanie ruchu rozpoczete na {duration_hours} godzin(y)...")
+
     try:
         while time.time() < end_time:
 
             #wybór losowej strony
 
             url = random.choice(WEBSITES)
-            
             try:
                 logger.info(f"Odwiedzam: {url}")
                 driver.get(url)
                 visits_count += 1
-                
+
                 #losowy czas czytania strony (między 5 a 30 sekund)
 
                 reading_time = random.uniform(5, 30)
                 time.sleep(reading_time)
-                
+
                 #kliknięcie (czasami) w losowy link na stronie (30% szans)
 
                 if random.random() < 0.3:
@@ -803,265 +849,35 @@ def generate_traffic(duration_hours=2):
                             random_link = random.choice(links[:20])
                             href = random_link.get_attribute("href")
                             if href and href.startswith("http"):
-                                logger.info(f"  → Klikam link: {href[:80]}")
+                                logger.info(f"  -> Klikam link: {href[:80]}")
                                 driver.get(href)
                                 visits_count += 1
                                 time.sleep(random.uniform(3, 15))
                     except Exception:
                         pass  #ignorowanie błędów klikania
-                
-                #losowa przerwa między stronami (między 2 a 10 sekund)
+
+                #losowa przerwa między stronami (miedzy 2 a 10 sekund)
 
                 pause = random.uniform(2, 10)
                 time.sleep(pause)
-                
+
                 #wyświetlenie postępu co 10 odwiedzin
 
                 if visits_count % 10 == 0:
                     elapsed = (time.time() - start_time) / 60
-                    logger.info(f"Postęp: {visits_count} odwiedzin w {elapsed:.1f} minut")
-                
+                    logger.info(f"Postep: {visits_count} odwiedzin w {elapsed:.1f} minut")
             except Exception as e:
-                logger.warning(f"Błąd podczas odwiedzania {url}: {e}")
+                logger.warning(f"Blad podczas odwiedzania {url}: {e}")
                 time.sleep(5)
-    
+
     except KeyboardInterrupt:
-        logger.info("Generowanie ruchu zatrzymane przez użytkownika.")
+        logger.info("Generowanie ruchu zatrzymane przez uzytkownika.")
     finally:
         driver.quit()
         elapsed_total = (time.time() - start_time) / 60
-        logger.info(f"Generowanie ruchu zakończone. Łącznie odwiedzin: {visits_count} w {elapsed_total:.1f} minut")
-
-
-if __name__ == "__main__":
-    generate_traffic(duration_hours=2) #generowanie ruchu przez 2 godziny
-
-```
-## **train_model.py**
-
-```py
-
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.svm import OneClassSVM
-from sklearn.preprocessing import StandardScaler
-import joblib
-import logging
-from datetime import datetime
-from database.connection import SessionLocal
-from database.tables import NetworkMetric, ModelInfo
-
-#konfiguracja logowania
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-logger = logging.getLogger(__name__)
-
-MODELS_DIR = "models" #katalog, w którym zapisywane są wytrenowane modele
-
-#cechy używane do trenowania modeli (takie jak w tabelinetwork_metrics)
-
-FEATURE_COLUMNS = [
-    'packets_count',
-    'unique_ips',
-    'unique_ports',
-    'avg_packet_size',
-    'tcp_ratio',
-    'udp_ratio',
-    'other_ratio',
-    'unique_connections',
-    'dominant_port',
-    'synchronization_packets_count',
-    'acknowledgment_packets_count',
-    'reset_packets_count',
-    'finish_packets_count'
-]
-
-#pobieranie danych z bazy i zamiana ich na format DataFrame
-
-def load_data_from_db():
-    logger.info("Łączenie z bazą danych...")
-    session = SessionLocal()
-    
-    try:
-        metrics = session.query(NetworkMetric).all()
-        logger.info(f"Pobrano {len(metrics)} rekordów z bazy.")
-        
-        if len(metrics) < 500:
-            logger.warning("Zbyt mało danych! Zalecane minimum to 1000 rekordów.")
-        
-        data = []
-        for m in metrics:
-            row = {col: getattr(m, col) for col in FEATURE_COLUMNS}
-            data.append(row)
-        
-        df = pd.DataFrame(data)
-        return df
-    
-    except Exception as e:
-        logger.error(f"Błąd podczas pobierania danych: {e}")
-        raise
-    finally:
-        session.close()
-
-#trenowanie modelu Isolation Forest i zapis do pliku
-
-def train_isolation_forest(X):
-    logger.info("Trenowanie modelu Isolation Forest...")
-    
-    model = IsolationForest(
-        n_estimators=100,
-        contamination=0.01,
-        random_state=42,
-        n_jobs=-1
-    )
-    model.fit(X)
-    
-    model_path = f"{MODELS_DIR}/isolation_forest.pkl"
-    joblib.dump(model, model_path)
-    logger.info(f"Isolation Forest zapisany jako '{model_path}'")
-    
-    return model, model_path
-
-#trenowanie modelu One-Class SVM (z wcześniejszą standaryzacją danych) i zapis do pliku
-
-def train_one_class_svm(X):
-    logger.info("Trenowanie modelu One-Class SVM...")
-    
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    model = OneClassSVM(
-        kernel='rbf',
-        gamma='scale',
-        nu=0.01
-    )
-    model.fit(X_scaled)
-    
-    model_path = f"{MODELS_DIR}/one_class_svm.pkl"
-    joblib.dump({
-        'model': model,
-        'scaler': scaler
-    }, model_path)
-    logger.info(f"One-Class SVM zapisany jako '{model_path}'")
-    
-    return model, model_path
-
-#trenowanie metody progowej (obliczanie średniej i odchylenia standardowego) i zapis do pliku
-
-def train_threshold_method(X):
-    logger.info("Trenowanie metody progowej...")
-    
-    means = X.mean(axis=0)
-    stds = X.std(axis=0)
-    
-    #zabezpieczenie przed dzieleniem przez zero, jeśli odchylenie wynosi 0
-
-    stds = stds.replace(0, 1e-6) if isinstance(stds, pd.Series) else np.where(stds == 0, 1e-6, stds) 
-    
-    model_path = f"{MODELS_DIR}/threshold_method.pkl"
-    joblib.dump({
-        'means': means,
-        'stds': stds,
-        'n_sigmas': 3
-    }, model_path)
-    logger.info(f"Metoda progowa zapisana jako '{model_path}'")
-    
-    return model_path
-
-#zapisywanie informacji o wytrenowanym modelu do tabeli model_info w bazie danych
-
-def save_model_info_to_db(model_name, algorithm_type, parameters, is_active=False):
-    session = SessionLocal()
-    try:
-
-        #jeśli model ma być aktywny najpierw dezaktywowane są wszystkie pozostałe
-
-        if is_active:
-            session.query(ModelInfo).update({ModelInfo.is_active: False})
-        
-        model_info = ModelInfo(
-            model_name=model_name,
-            algorithm_type=algorithm_type,
-            training_date=datetime.utcnow(),
-            parameters=parameters,
-            accuracy=None,
-            is_active=is_active
-        )
-        session.add(model_info)
-        session.commit()
-        logger.info(f"Informacje o modelu '{model_name}' zapisane w bazie")
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Błąd podczas zapisywania informacji o modelu: {e}")
-    finally:
-        session.close()
-
-#główna funkcja trenująca wszystkie 3 modele po kolei
-
-def train_all_models():
-    logger.info("=" * 60)
-    logger.info("ROZPOCZĘCIE TRENINGU MODELI")
-    logger.info("=" * 60)
-    
-    #pobranie danych z bazy
-
-    df = load_data_from_db()
-    
-    if df.empty:
-        logger.error("Brak danych do trenowania.")
-        return
-    
-    #sprawdzenie, czy wszystkie wymagane kolumny są dostępne w pobranych danych
-
-    missing_cols = [col for col in FEATURE_COLUMNS if col not in df.columns]
-    if missing_cols:
-        logger.error(f"Brakujące kolumny w bazie: {missing_cols}")
-        return
-    
-    X = df[FEATURE_COLUMNS]
-    logger.info(f"Macierz cech: {X.shape[0]} wierszy × {X.shape[1]} cech")
-    
-    #trenowanie i zapis modelu 1: Isolation Forest
-
-    model_if, path_if = train_isolation_forest(X)
-    save_model_info_to_db(
-        model_name="Isolation Forest v1",
-        algorithm_type="IsolationForest",
-        parameters="n_estimators=100, contamination=0.01, random_state=42",
-        is_active=True
-    )
-    
-    #trenowanie i zapis modelu 2: One-Class SVM
-
-    model_svm, path_svm = train_one_class_svm(X)
-    save_model_info_to_db(
-        model_name="One-Class SVM v1",
-        algorithm_type="OneClassSVM",
-        parameters="kernel=rbf, gamma=scale, nu=0.01",
-        is_active=False
-    )
-    
-    #trenowanie i zapis modelu 3: Metoda progowa
-
-    path_threshold = train_threshold_method(X)
-    save_model_info_to_db(
-        model_name="Threshold Method v1",
-        algorithm_type="Threshold",
-        parameters="n_sigmas=3 (mean ± 3*std)",
-        is_active=False
-    )
-    
-    logger.info("=" * 60)
-    logger.info("WSZYSTKIE 3 MODELE ZOSTAŁY WYTRENOWANE")
-    logger.info("=" * 60)
-    logger.info(f"Pliki modeli zapisane w folderze: {MODELS_DIR}/")
-
-#uruchomienie trenowania wszystkich modeli
+        logger.info(f"Generowanie ruchu zakonczone. Lacznie odwiedzin: {visits_count} w {elapsed_total:.1f} minut")
 
 if __name__ == "__main__":
-    train_all_models()
+    generate_traffic(duration_hours=0.25)
 
 ```
