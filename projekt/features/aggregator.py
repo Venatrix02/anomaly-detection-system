@@ -1,4 +1,5 @@
 from collections import Counter
+import numpy as np
 
 #tworzenie podsumowania z listy pakietów
 
@@ -7,24 +8,21 @@ def aggregate_packets(packet_list):
         return None
 
     total_packets = len(packet_list)
-
     unique_ips = len(
         set(p["src_ip"] for p in packet_list) |
         set(p["dst_ip"] for p in packet_list)
     )
-
     unique_ports = len(
         set(p["src_port"] for p in packet_list) |
         set(p["dst_port"] for p in packet_list)
     )
-
     average_packet_size = sum(p["size"] for p in packet_list) / total_packets
 
     tcp_packets = sum(1 for p in packet_list if p["protocol"] == "TCP")
     udp_packets = sum(1 for p in packet_list if p["protocol"] == "UDP")
     other_packets = sum(1 for p in packet_list if p["protocol"] == "OTHER")
 
-#liczenie, ile jest różnych połączeń (unikalnych kompinacji adresów IP, portów i protokołu)
+    #liczenie, ile jest różnych połączeń
 
     unique_connections = len(
         set(
@@ -39,35 +37,44 @@ def aggregate_packets(packet_list):
         )
     )
 
-#szukanie portu, który pojawiał się najczęściej
+    #szukanie portu, który pojawiał się najczęściej
 
     destination_port_counter = Counter(
-        p["dst_port"] for p in packet_list if p["dst_port"] != 0 #pominięcie 0, które oznacza brak portu
+        p["dst_port"] for p in packet_list if p["dst_port"] != 0
     )
     most_common_port = destination_port_counter.most_common(1)
     dominant_destination_port = most_common_port[0][0] if most_common_port else 0
 
-#liczenie różnych sygnałów TCP
+    #liczenie różnych sygnałów TCP
 
     synchronization_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "S" in p["tcp_flags"] and "A" not in p["tcp_flags"]
     )
-
     acknowledgment_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "A" in p["tcp_flags"]
     )
-
     reset_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "R" in p["tcp_flags"]
     )
-
     finish_packets_count = sum(
         1 for p in packet_list
         if p["tcp_flags"] and "F" in p["tcp_flags"]
     )
+
+    #odchylenie standardowe rozmiaru pakietu
+
+    packet_sizes = [p["size"] for p in packet_list]
+    packet_size_std = float(np.std(packet_sizes)) if packet_sizes else 0.0
+
+    #stosunek SYN do ACK (wykrywanie SYN Flood)
+ 
+    if acknowledgment_packets_count > 0:
+        syn_to_ack_ratio = synchronization_packets_count / acknowledgment_packets_count
+    else:
+        syn_to_ack_ratio = float(synchronization_packets_count)
 
     window_start = min(p["timestamp"] for p in packet_list)
     window_end = max(p["timestamp"] for p in packet_list)
@@ -87,5 +94,7 @@ def aggregate_packets(packet_list):
         "synchronization_packets_count": synchronization_packets_count,
         "acknowledgment_packets_count": acknowledgment_packets_count,
         "reset_packets_count": reset_packets_count,
-        "finish_packets_count": finish_packets_count
+        "finish_packets_count": finish_packets_count,
+        "packet_size_std": round(packet_size_std, 2),
+        "syn_to_ack_ratio": round(syn_to_ack_ratio, 4)
     }

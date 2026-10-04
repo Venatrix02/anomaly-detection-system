@@ -1,6 +1,7 @@
 import logging
+from datetime import datetime, timezone, timedelta
 from database.connection import SessionLocal
-from database.tables import NetworkMetric, SystemLog
+from database.tables import NetworkMetric, SystemLog, Alert, Anomaly
 
 logger = logging.getLogger(__name__)
 
@@ -12,78 +13,92 @@ def save_log(session, level, message):
     session.commit()
 
 #zapisanie jednego podsumowania ruchu sieciowego do bazy danych
-
 def save_metric(metric_data):
     if not metric_data:
-        return
-
-    session = SessionLocal()
-
-    try:
-        metric = NetworkMetric(**metric_data)
-        session.add(metric)
-        session.commit()
-
-        msg = (
-            f"Metric saved: {metric_data['packets_count']} packets, "
-            f"{metric_data['unique_ips']} unique IPs"
-        )
-        logger.info(msg)
-        save_log(session, "INFO", msg)
-
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error saving metric: {e}")
-        save_log(session, "ERROR", str(e))
-
-    finally:
-        session.close()
+        return None
+    with SessionLocal() as session:
+        try:
+            metric = NetworkMetric(**metric_data)
+            session.add(metric)
+            session.commit()
+            session.refresh(metric)
+            msg = (
+                f"Metric saved: {metric_data['packets_count']} packets, "
+                f"{metric_data['unique_ips']} unique IPs"
+            )
+            logger.info(msg)
+            save_log(session, "INFO", msg)
+            return metric.id
+        except Exception as e:
+            session.rollback()
+            logger.error("Error saving metric: " + str(e))
+            save_log(session, "ERROR", str(e))
+            return None
 
 #zapisanie wykrytej anomalii do bazy danych
+
 def save_anomaly(anomaly_data):
     if not anomaly_data:
         return None
-    session = SessionLocal()
-    try:
-        from database.tables import Anomaly
-        anomaly = Anomaly(**anomaly_data)
-        session.add(anomaly)
-        session.commit()
-        logger.info(f"Anomaly saved: score={anomaly_data['anomaly_score']}, severity={anomaly_data['severity_level']}")
-        return anomaly.id
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error saving anomaly: {e}")
-        return None
-    finally:
-        session.close()
+    with SessionLocal() as session:
+        try:
+            anomaly = Anomaly(**anomaly_data)
+            session.add(anomaly)
+            session.commit()
+            session.refresh(anomaly)
+            logger.info("Anomaly saved: score=" + str(anomaly_data['anomaly_score']) + ", severity=" + str(anomaly_data['severity_level']))
+            return anomaly.id
+        except Exception as e:
+            session.rollback()
+            logger.error("Error saving anomaly: " + str(e))
+            return None
 
+#zapisanie alertu do bazy danych, z uwzględnieniem cooldownu dla alertów o tym samym poziomie istotności
 
-#zapisanie alertu do bazy danych
-
-def save_alert(anomaly_id):
+def save_alert(anomaly_id, severity_level):
     if not anomaly_id:
         return
-    session = SessionLocal()
-    try:
-        from database.tables import Alert
-        alert = Alert(anomaly_id=anomaly_id, status="new")
-        session.add(alert)
-        session.commit()
-        logger.info(f"Alert saved for anomaly ID: {anomaly_id}")
-    except Exception as e:
-        session.rollback()
-        logger.error(f"Error saving alert: {e}")
-    finally:
-        session.close()
+    with SessionLocal() as session:
+        try:
 
+            #sprawdzanie, czy istnieje już alert o tym samym poziomie istotności w ciągu ostatnich 5 minut
 
-#wyznaczanie poziomu istotności na podstawie anomaly score
+            recent_alert = session.query(Alert).join(Anomaly).filter(
+                Anomaly.severity_level == severity_level,
+                Alert.status == "new",
+                Alert.created_at >= datetime.now(timezone.utc) - timedelta(minutes=5)
+            ).first()
+
+            if recent_alert:
+
+                #aktualizacja czasu ostatniego wystąpienia alertu, jeśli istnieje już alert o tym samym poziomie istotności
+                
+                recent_alert.last_seen = datetime.now(timezone.utc)
+                session.commit()
+                logger.info("Alert cooldown: updated last_seen for severity " + severity_level)
+            else:
+                
+                #tworzenie nowego alertu
+                
+                new_alert = Alert(
+                    anomaly_id=anomaly_id,
+                    status="new",
+                    created_at=datetime.now(timezone.utc),
+                    last_seen=datetime.now(timezone.utc)
+                )
+                session.add(new_alert)
+                session.commit()
+                logger.info("Alert saved for severity: " + severity_level)
+        except Exception as e:
+            session.rollback()
+            logger.error("Error saving alert: " + str(e))
+
+#wyznaczanie poziomu istotności anomalii na podstawie anomaly score
 
 def determine_severity(score):
 
-    #im bardziej ujemny score, tym większa anomalia
-    
+    #im bardziej ujemnty score, tym większa anomalia
+
     if score < -0.5:
         return "high"
     elif score < -0.2:
