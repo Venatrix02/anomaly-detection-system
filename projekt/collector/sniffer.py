@@ -1,17 +1,20 @@
 import logging
 import time
+import os
 from scapy.all import sniff, IP, TCP, UDP
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-IFACE = "wlo1" #karta sieciowa, z której zbieram ruch
+IFACE = os.getenv("SNIFFER_IFACE", "wlo1") #interfejs sieciowy pobierany z .env
 
 #wyciąganie najważniejszych informacji z pakietów
 
 def process_packet(packet, packet_list):
     if IP in packet:
         tcp_flags = str(packet[TCP].flags) if TCP in packet else ""
-
         packet_list.append({
             "timestamp": time.time(),
             "src_ip": packet[IP].src,
@@ -27,7 +30,6 @@ def process_packet(packet, packet_list):
 
 def capture_packets(duration=1):
     packet_list = []
-
     try:
         sniff(
             iface=IFACE,
@@ -39,5 +41,9 @@ def capture_packets(duration=1):
         logger.info(f"Captured {len(packet_list)} packets")
     except Exception as e:
         logger.error(f"Error during packet capture: {e}")
-
     return packet_list
+
+#bezpieczne zatrzymanie sniffera
+
+def stop_sniffer():
+    logger.info("Sniffer will stop after current capture cycle.")
