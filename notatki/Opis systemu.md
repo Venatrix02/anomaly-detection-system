@@ -111,6 +111,19 @@
 * Panel umożliwia eksport danych do plików CSV lub PDF.
 * **Narzędzia:** Python i Django lub FastAPI i Chart.js do wykresów.
 
+## **h) Moduł 8 (dodatkowy) - analiza porównawcza i generowanie wizualizacji do artykułu:**
+
+System został wyposażony w dedykowany moduł analityczny (`generate_paper_figures.py`), który pobiera dane z bazy i generuje profesjonalne wizualizacje oraz statystyki niezbędne do oceny skuteczności modeli. Moduł ten realizuje:
+- Normalizację osi czasu w celu porównywalności wykresów dla różnych modeli (każdy model był testowany w oddzielnej sesji w celu zachowania czystego stanu detekcji).
+- Generowanie wykresów liniowych (subplots) pokazujących ewolucję `anomaly_score` w czasie, z wizualnym oznaczeniem momentu rozpoczęcia ataku (czerwona przerywana linia).
+- Tworzenie wykresów skrzynkowych (boxplot) porównujących rozkład wyników między Isolation Forest a One-Class SVM oraz osobno dla Metody Progowej.
+- Eksport surowych danych i tabel statystycznych (średnia, odchylenie standardowe, min, max, liczba próbek) do formatu CSV.
+Dzięki temu modułowi praca zawiera twarde dane empiryczne potwierdzające, że:
+  - Isolation Forest oferuje najbardziej stabilne wykrywanie (średni score ok. -0.686, odchylenie standardowe 0.009, 106 wykrytych anomalii).
+  - One-Class SVM charakteryzuje się bardziej zachowawczą reakcją (51 wykrytych anomalii, szerszy rozrzut wyników).
+  - Metoda Progowa jest wysoce agresywna i czuła na pojedyncze piki metryk (14 wykrytych anomalii, skrajne wartości score sięgające -542.5).
+Dodatkowo zweryfikowano skuteczność mechanizmu cooldown, który zredukował liczbę generowanych alertów o ponad 99% (z 106 pojedynczych detekcji do 1 skonsolidowanego alertu z aktualizowanym czasem `last_seen`).
+
 ## **Ogólne zabezpieczenia systemu:**
 
 * System stosuje szyfrowane połączenia (HTTPS/SSL) między frontendem a backendem, aby chronić dane przesyłane w sieci.
@@ -135,5 +148,5 @@
 * System został przetestowany w warunkach kontrolowanych, z wykorzystaniem narzędzia `nmap` do symulacji ataku typu skanowanie portów (SYN scan). Testy potwierdziły skuteczność wszystkich trzech algorytmów w wykrywaniu anomalii:
   * **Isolation Forest** - stabilne wyniki (ok. `-0.70`), szybka i pewna reakcja od pierwszego okna czasowego.
   * **One-Class SVM** - stopniowa eskalacja pewności (od `-0.15` do `-1.23`), bardziej zachowawczy na początku.
-  * **Metoda progowa** - najbardziej agresywna reakcja (wyniki nawet do `-10809`), bardzo czuła na nagłe piki pojedynczych metryk.
+  * **Metoda progowa** - najbardziej agresywna reakcja (skrajne wyniki sięgające `-542.5`), bardzo czuła na nagłe piki pojedynczych metryk.
 * Podczas testów z atakiem SYN scan (`nmap -sS -Pn -p 1-10000 8.8.8.8`) system wykrył anomalię z wynikiem `-0.70` i poziomem istotności `high`. Mechanizm cooldown skutecznie ograniczył liczbę alertów - mimo 96+ wykrytych anomalii w trakcie ataku, w bazie danych utworzony został tylko 1 alert z aktualizowanym czasem `last_seen`.
