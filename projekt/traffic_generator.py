@@ -47,12 +47,12 @@ def generate_traffic(duration_hours=2):
     prefs = {"profile.managed_default_content_settings.images": 2}
     chrome_options.add_experimental_option("prefs", prefs)
 
-    logger.info("Uruchamianie przegladarki Chrome...")
+    logger.info("Starting Chrome browser...")
     try:
         driver = webdriver.Chrome(options=chrome_options)
     except Exception as e:
-        logger.error(f"Nie udalo sie uruchomic Chrome: {e}")
-        logger.info("Probuję alternatywna metode...")
+        logger.error(f"Failed to start Chrome: {e}")
+        logger.info("Trying alternative method...")
         chrome_options = Options()
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
@@ -62,7 +62,7 @@ def generate_traffic(duration_hours=2):
     end_time = time.time() + (duration_hours * 3600)
     visits_count = 0
     start_time = time.time()
-    logger.info(f"Generowanie ruchu rozpoczete na {duration_hours} godzin(y)...")
+    logger.info(f"Traffic generation started for {duration_hours} hour(s)...")
 
     try:
         while time.time() < end_time:
@@ -71,7 +71,7 @@ def generate_traffic(duration_hours=2):
 
             url = random.choice(WEBSITES)
             try:
-                logger.info(f"Odwiedzam: {url}")
+                logger.info(f"Visiting:  {url}")
                 driver.get(url)
                 visits_count += 1
 
@@ -89,7 +89,7 @@ def generate_traffic(duration_hours=2):
                             random_link = random.choice(links[:20])
                             href = random_link.get_attribute("href")
                             if href and href.startswith("http"):
-                                logger.info(f"  -> Klikam link: {href[:80]}")
+                                logger.info(f"  -> Clicking link: {href[:80]}")
                                 driver.get(href)
                                 visits_count += 1
                                 time.sleep(random.uniform(3, 15))
@@ -105,17 +105,17 @@ def generate_traffic(duration_hours=2):
 
                 if visits_count % 10 == 0:
                     elapsed = (time.time() - start_time) / 60
-                    logger.info(f"Postep: {visits_count} odwiedzin w {elapsed:.1f} minut")
+                    logger.info(f"Progress: {visits_count} visits in {elapsed:.1f} minutes")
             except Exception as e:
-                logger.warning(f"Blad podczas odwiedzania {url}: {e}")
+                logger.warning(f"Error while visiting {url}: {e}")
                 time.sleep(5)
 
     except KeyboardInterrupt:
-        logger.info("Generowanie ruchu zatrzymane przez uzytkownika.")
+        logger.info("Traffic generation stopped by user.")
     finally:
         driver.quit()
         elapsed_total = (time.time() - start_time) / 60
-        logger.info(f"Generowanie ruchu zakonczone. Lacznie odwiedzin: {visits_count} w {elapsed_total:.1f} minut")
+        logger.info(f"Traffic generation completed. Total visits: {visits_count} in {elapsed_total:.1f} minutes")
 
 if __name__ == "__main__":
     generate_traffic(duration_hours=0.25)

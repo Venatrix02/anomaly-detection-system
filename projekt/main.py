@@ -29,7 +29,7 @@ last_aggregation = time.time()
 #funkcja obsługi sygnałów (Ctrl+C, kill)
 
 def signal_handler(sig, frame):
-    logger.info("\n[!] Otrzymano sygnal zamkniecia. Zatrzymywanie systemu...")
+    logger.info("\n[!] Shutdown signal received. Stopping system...")
     stop_sniffer()
     sys.exit(0)
 
@@ -47,13 +47,17 @@ model_loaded = False
 
 try:
     detector = AnomalyDetector()
-    model_loaded = detector.model is not None
+
+    #sprawdzenie czy załadowano cokolwiek (standardowy model lub statystyki progowe)
+    
+    model_loaded = (detector.model is not None) or (detector.threshold_stats is not None)
+    
     if model_loaded:
         logger.info("Model loaded: " + detector.algorithm_type)
     else:
-        logger.warning("No model available. System will ONLY collect data (no anomaly detection).")
+        logger.warning("No model available. System will only collect data (no anomaly detection).")
 except Exception as e:
-    logger.warning("Could not load model: " + str(e) + ". System will ONLY collect data.")
+    logger.warning("Could not load model: " + str(e) + ". System will only collect data.")
     detector = None
     model_loaded = False
 

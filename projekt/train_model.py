@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 MODELS_DIR = "models"
 
-#cechy używane do trenowania modeli (identyczna kolejność jak w detector.py)
+#cechy używane do trenowania modeli
 
 FEATURE_COLUMNS = [
     'packets_count',
@@ -43,13 +43,13 @@ FEATURE_COLUMNS = [
 #pobieranie danych z bazy
 
 def load_data_from_db():
-    logger.info("Łączenie z bazą danych...")
+    logger.info("Connecting to the database...")
     with SessionLocal() as session:
         try:
             metrics = session.query(NetworkMetric).all()
-            logger.info(f"Pobrano {len(metrics)} rekordów z bazy.")
+            logger.info(f"Fetched  {len(metrics)} records from the database.")
             if len(metrics) < 500:
-                logger.warning("Zbyt mało danych! Zalecane minimum to 1000 rekordów.")
+                logger.warning("Too little data! Recommended minimum is 1000 records.")
             data = []
             for m in metrics:
                 row = {col: getattr(m, col) for col in FEATURE_COLUMNS}
@@ -57,13 +57,13 @@ def load_data_from_db():
             df = pd.DataFrame(data)
             return df
         except Exception as e:
-            logger.error(f"Błąd podczas pobierania danych: {e}")
+            logger.error(f"Error while fetching data: {e}")
             raise
 
 #trenowanie modelu Isolation Forest
 
 def train_isolation_forest(X):
-    logger.info("Trenowanie modelu Isolation Forest...")
+    logger.info("Training Isolation Forest model...")
     model = IsolationForest(
         n_estimators=100,
         contamination=0.01,
@@ -73,13 +73,13 @@ def train_isolation_forest(X):
     model.fit(X)
     model_path = f"{MODELS_DIR}/isolation_forest.pkl"
     joblib.dump(model, model_path)
-    logger.info(f"Isolation Forest zapisany jako '{model_path}'")
+    logger.info(f"Isolation Forest saved as '{model_path}'")
     return model, model_path
 
 #trenowanie One-Class SVM
 
 def train_one_class_svm(X):
-    logger.info("Trenowanie modelu One-Class SVM...")
+    logger.info("Training One-Class SVM model...")
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     model = OneClassSVM(
@@ -93,13 +93,13 @@ def train_one_class_svm(X):
         'model': model,
         'scaler': scaler
     }, model_path)
-    logger.info(f"One-Class SVM zapisany jako '{model_path}'")
+    logger.info(f"One-Class SVM saved as '{model_path}'")
     return model, model_path
 
 #trenowanie metody progowej
 
 def train_threshold_method(X):
-    logger.info("Trenowanie metody progowej...")
+    logger.info("Training threshold method...")
     means = X.mean(axis=0)
     stds = X.std(axis=0)
     stds = stds.replace(0, 1e-6) if isinstance(stds, pd.Series) else np.where(stds == 0, 1e-6, stds)
@@ -109,7 +109,7 @@ def train_threshold_method(X):
         'stds': stds,
         'n_sigmas': 3
     }, model_path)
-    logger.info(f"Metoda progowa zapisana jako '{model_path}'")
+    logger.info(f"Threshold method saved as '{model_path}'")
     return model_path
 
 #zapisywanie informacji o modelu do bazy
@@ -129,10 +129,10 @@ def save_model_info_to_db(model_name, algorithm_type, parameters, is_active=Fals
             )
             session.add(model_info)
             session.commit()
-            logger.info(f"Informacje o modelu '{model_name}' zapisane w bazie")
+            logger.info(f"Model information for '{model_name}' saved to the database")
         except Exception as e:
             session.rollback()
-            logger.error(f"Błąd podczas zapisywania informacji o modelu: {e}")
+            logger.error(f"Error while saving model information: {e}")
 
 #zapis metadanych modelu do JSON
 
@@ -145,23 +145,23 @@ def save_model_metadata(X):
     }
     with open(f"{MODELS_DIR}/model_metadata.json", "w") as f:
         json.dump(metadata, f, indent=4)
-    logger.info(f"Metadane modelu zapisane w '{MODELS_DIR}/model_metadata.json'")
+    logger.info(f"Model metadata saved in '{MODELS_DIR}/model_metadata.json'")
 
 #główna funkcja trenująca
 
 def train_all_models():
     logger.info("=" * 60)
-    logger.info("ROZPOCZĘCIE TRENINGU MODELI")
+    logger.info("STARTING MODEL TRAINING")
     logger.info("=" * 60)
 
     df = load_data_from_db()
     if df.empty:
-        logger.error("Brak danych do trenowania.")
+        logger.error("No data available for training.")
         return
 
     missing_cols = [col for col in FEATURE_COLUMNS if col not in df.columns]
     if missing_cols:
-        logger.error(f"Brakujące kolumny w bazie: {missing_cols}")
+        logger.error(f"Missing columns in database: {missing_cols}")
         return
 
     #czyszczenie danych
@@ -169,10 +169,10 @@ def train_all_models():
     initial_count = len(df)
     df = df[(df['packets_count'] >= 0) & (df['packets_count'] < 100000)]
     df = df.fillna(0)
-    logger.info(f"Wyczyszczono dane: usunięto {initial_count - len(df)} rekordów (błędy pomiaru).")
+    logger.info(f"Cleaned data: removed {initial_count - len(df)} records (measurement errors).")
 
     X = df[FEATURE_COLUMNS]
-    logger.info(f"Macierz cech: {X.shape[0]} wierszy × {X.shape[1]} cech")
+    logger.info(f"Feature matrix: {X.shape[0]} rows × {X.shape[1]} features")
 
     #zapis metadanych
 
@@ -205,9 +205,9 @@ def train_all_models():
     )
 
     logger.info("=" * 60)
-    logger.info("WSZYSTKIE 3 MODELE ZOSTAŁY WYTRENOWANE")
+    logger.info("ALL 3 MODELS HAVE BEEN TRAINED")
     logger.info("=" * 60)
-    logger.info(f"Pliki modeli zapisane w folderze: {MODELS_DIR}/")
+    logger.info(f"Model files saved in folder: {MODELS_DIR}/")
 
 if __name__ == "__main__":
     train_all_models()
