@@ -1,5 +1,6 @@
 import joblib
 import logging
+import pandas as pd
 from database.connection import SessionLocal
 from database.tables import ModelInfo
 
@@ -75,7 +76,7 @@ class AnomalyDetector:
 
         #przygotowanie wektora cech w odpowiedniej kolejności
 
-        X = [[metric_data.get(col, 0) for col in FEATURE_COLUMNS]]
+        X = pd.DataFrame([metric_data]).reindex(columns=FEATURE_COLUMNS, fill_value=0)
         
         if self.algorithm_type == "IsolationForest":
 
@@ -108,9 +109,7 @@ class AnomalyDetector:
             n_sigmas = self.threshold_stats['n_sigmas']
             
             for i, col in enumerate(FEATURE_COLUMNS):
-                val = X[0][i]
-                
-                #bezpieczne pobieranie wartości, niezależnie czy to pandas Series czy słownik
+                val = X.iloc[0][i]
 
                 if hasattr(means, 'get'):
                     mean = means.get(col, 0)
